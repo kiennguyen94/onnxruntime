@@ -111,6 +111,7 @@ if (onnxruntime_BUILD_WEBASSEMBLY_STATIC_LIB)
       onnxruntime_session
       onnxruntime_util
       re2::re2
+      ${onnxruntime_EXTERNAL_LIBRARIES_XNNPACK}
     )
 
     if (onnxruntime_BUILD_UNIT_TESTS)
@@ -155,21 +156,25 @@ else()
     ${onnxruntime_webassembly_src}
   )
 
-  target_link_libraries(onnxruntime_webassembly PRIVATE
-    nsync_cpp
-    ${PROTOBUF_LIB}
-    onnx
-    onnx_proto
+  target_link_libraries(onnxruntime_webassembly PRIVATE    
+    onnxruntime_session
+    ${ONNXRUNTIME_XNNPACK_OPTIMIZER_LIBRARY}
+    onnxruntime_optimizer
+    ${ONNXRUNTIME_XNNPACK_PROVIDER_LIBRARY}
+    onnxruntime_providers
+    onnxruntime_framework
+    onnxruntime_graph  
+    onnxruntime_util
+    ${ONNXRUNTIME_XNNPACK_SCHEMAS_LIBRARY}
+    ${ONNXRUNTIME_MLAS_LIBS}
     onnxruntime_common
     onnxruntime_flatbuffers
-    onnxruntime_framework
-    onnxruntime_graph
-    onnxruntime_mlas
-    onnxruntime_optimizer
-    onnxruntime_providers
-    onnxruntime_session
-    onnxruntime_util
     re2::re2
+    nsync_cpp    
+    onnx
+    onnx_proto
+    ${PROTOBUF_LIB}
+    ${onnxruntime_EXTERNAL_LIBRARIES_XNNPACK}
   )
 
   set(EXPORTED_RUNTIME_METHODS "['stackAlloc','stackRestore','stackSave','UTF8ToString','stringToUTF8','lengthBytesUTF8']")
