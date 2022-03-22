@@ -2,7 +2,11 @@
 // Licensed under the MIT License.
 
 #include "xnnpack_onnx_defs.h"
+
 #include <onnx/defs/schema.h>
+
+#include <array>
+#include <safeint/SafeInt.hpp>
 
 using namespace onnx;
 
@@ -12,61 +16,47 @@ namespace xnnpack {
 using ::ONNX_NAMESPACE::Common::StatusCategory;
 using ::ONNX_NAMESPACE::Common::StatusCode;
 
-static OnnxStatus ComputeOutputSizeSame(ptrdiff_t input_size, int stride, ptrdiff_t* output_size) {
-  if (stride == 0) {
-    *output_size = -1;
+OnnxStatus ComputeOutputSizeSame(ptrdiff_t input_size, uint32_t stride, ptrdiff_t* output_size) {
+  if (stride == 0 || input_size <= 0) {
     return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL);
   }
-  *output_size = input_size + stride - 1;
-  *output_size = *output_size / stride;
-  return ::ONNX_NAMESPACE::Common::Status::OK();
+  size_t r = static_cast<size_t>(input_size) + stride - 1;
+  if (r > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())) {
+    return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL);
+  }
+  *output_size = r / stride;
+  return OnnxStatus::OK();
 }
 
-static OnnxStatus ComputeOutputSizeValid(ptrdiff_t input_size, int stride, ptrdiff_t filter_size,
-                                         uint32_t dilation_rate, ptrdiff_t* output_size) {
-  if (stride == 0) {
-    *output_size = -1;
+OnnxStatus ComputeOutputSizeValid(ptrdiff_t input_size, uint32_t stride, ptrdiff_t filter_size, uint32_t dilation_rate,
+                                  ptrdiff_t* output_size) {
+  if (filter_size < 1) {
+    return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL);
+  }
+  if (stride <= 0) {
     return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL);
   }
   if (dilation_rate > 1) {
-    filter_size = (filter_size - 1) * dilation_rate + 1;
+    if (!SafeMultiply(filter_size - 1, dilation_rate, filter_size)) {
+      return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL);
+    }
+    if (!SafeAdd(filter_size, 1, filter_size)) {
+      return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL);
+    }
   }
-  if (input_size + 1 <= filter_size) {
-    *output_size = -1;
+
+  if (!SafeSubtract(input_size, filter_size, input_size)) return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL);
+  if (input_size < 0) {
     return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL);
   }
-
-  *output_size = input_size - filter_size + stride;
-  *output_size = *output_size / stride;
-  return ::ONNX_NAMESPACE::Common::Status::OK();
-}
-
-// padding_mode: 0, valid. 1, same
-OnnxStatus ConvShapeInference(const ::ONNX_NAMESPACE::TensorShapeProto_Dimension& batch_shape, ptrdiff_t in_height,
-                              ptrdiff_t in_width, ptrdiff_t in_channels,
-                              const ::ONNX_NAMESPACE::TensorShapeProto_Dimension& out_channels, ptrdiff_t filter_height,
-                              ptrdiff_t filter_width, ptrdiff_t in_channels1, uint32_t strides_h, uint32_t strides_w,
-                              uint32_t dilation_h, uint32_t dilation_w, int padding_mode,
-                              ::ONNX_NAMESPACE::TensorShapeProto_Dimension** output) {
-  if (in_channels != in_channels1) {
+  if (!SafeAdd(input_size, stride, input_size)) {
     return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL);
   }
-
-  *output[0] = batch_shape;
-  ptrdiff_t output1, output2;
-  if (padding_mode == 1) {
-    ONNX_RETURN_IF_ERROR(ComputeOutputSizeSame(in_height, strides_h, &output1));
-    ONNX_RETURN_IF_ERROR(ComputeOutputSizeSame(in_width, strides_w, &output2));
-  } else if (padding_mode == 0) {
-    ONNX_RETURN_IF_ERROR(ComputeOutputSizeValid(in_height, strides_h, filter_height, dilation_h, &output1));
-    ONNX_RETURN_IF_ERROR(ComputeOutputSizeValid(in_width, strides_w, filter_width, dilation_w, &output2));
-  } else {
-    return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL, "Invalid padding mode.");
+  assert(input_size > 0);
+  if (!SafeDivide(input_size, stride, input_size)) {
+    return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL);
   }
-
-  *output[3] = out_channels;
-  output[1]->set_dim_value(output1);
-  output[2]->set_dim_value(output2);
+  *output_size = input_size;
   return ::ONNX_NAMESPACE::Common::Status::OK();
 }
 
@@ -83,32 +73,43 @@ OnnxStatus XnnPackConvShapeInferImpl(const ::ONNX_NAMESPACE::TensorShapeProto& i
   if (weight_shape.dim_size() != 4) {
     return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL, "Weight tensor must have 4 dimensions");
   }
+
+  if (!input_shape.dim(3).has_dim_value()) {
+    return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL, "Channel can not be unknown");
+  }
+  // Though the first dim of weight can be unknown, our implementation doesn't support it.
   for (int i = 1; i != 3; ++i) {
-    if (!input_shape.dim(i).has_dim_value()) {
-      return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL, "Only the first dim(batch size) can be unknown");
-    }
     if (!weight_shape.dim(i).has_dim_value()) {
       return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL, "Only the first dim can be unknown");
     }
   }
-  int64_t input_H = input_shape.dim(1).dim_value();
-  int64_t input_W = input_shape.dim(2).dim_value();
-  int64_t input_C = input_shape.dim(3).dim_value();
-
-  int64_t filter_height = weight_shape.dim(1).dim_value();
-  int64_t filter_width = weight_shape.dim(2).dim_value();
-  int64_t in_channels = weight_shape.dim(3).dim_value();
-  input_H += static_cast<int64_t>(input_padding_top) + input_padding_bottom;
-  input_W += static_cast<int64_t>(input_padding_right) + input_padding_left;
-  ::ONNX_NAMESPACE::TensorShapeProto_Dimension* output_dims[4];
+  const ::ONNX_NAMESPACE::TensorShapeProto_Dimension& input_H = input_shape.dim(1);
+  const ::ONNX_NAMESPACE::TensorShapeProto_Dimension& input_W = input_shape.dim(2);
+  std::array<::ONNX_NAMESPACE::TensorShapeProto_Dimension*, 4> output_dims = {nullptr, nullptr, nullptr, nullptr};
 
   output_dims[0] = final_output_shape->add_dim();
   output_dims[1] = final_output_shape->add_dim();
   output_dims[2] = final_output_shape->add_dim();
   output_dims[3] = final_output_shape->add_dim();
-  ONNX_RETURN_IF_ERROR(ConvShapeInference(input_shape.dim(0), input_H, input_W, input_C, weight_shape.dim(0),
-                                          filter_height, filter_width, in_channels, subsampling_height,
-                                          subsampling_width, dilation_h, dilation_w, padding_mode, output_dims));
+  if (input_H.has_dim_value() && input_W.has_dim_value()) {
+    int64_t input_C = input_shape.dim(3).dim_value();
+
+    int64_t filter_height = weight_shape.dim(1).dim_value();
+    int64_t filter_width = weight_shape.dim(2).dim_value();
+    int64_t in_channels = weight_shape.dim(3).dim_value();
+    int64_t input_H_value = input_H.dim_value();
+    int64_t input_W_value = input_W.dim_value();
+    input_H_value += static_cast<int64_t>(input_padding_top) + input_padding_bottom;
+    input_W_value += static_cast<int64_t>(input_padding_right) + input_padding_left;
+
+    ONNX_RETURN_IF_ERROR(ConvShapeInference(
+        input_shape.dim(0), input_H_value, input_W_value, input_C, weight_shape.dim(0), filter_height, filter_width,
+        in_channels, subsampling_height, subsampling_width, dilation_h, dilation_w, padding_mode, output_dims));
+  } else {
+    *output_dims[0] = input_shape.dim(0);
+    *output_dims[3] = weight_shape.dim(0);
+  }
+
   return OnnxStatus::OK();
 }
 
@@ -145,13 +146,11 @@ OnnxStatus XnnPackDepthwiseConvolution2dShapeInferImpl(const ::ONNX_NAMESPACE::T
   }
   int64_t filter_height = weight_shape.dim(1).dim_value();
   int64_t filter_width = weight_shape.dim(2).dim_value();
-#if 0
   int64_t input_channels_by_depth_multiplier = weight_shape.dim(3).dim_value();
   if (input_channels_by_depth_multiplier % input_C != 0) {
     return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL,
                       "The last dim of weight is not multiple of input channels.");
   }
-#endif
   input_H += static_cast<int64_t>(input_padding_top) + input_padding_bottom;
   input_W += static_cast<int64_t>(input_padding_right) + input_padding_left;
   ::ONNX_NAMESPACE::TensorShapeProto_Dimension* output_dims[4];
