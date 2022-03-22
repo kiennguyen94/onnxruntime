@@ -648,45 +648,54 @@ Status TensorProtoToTensor(const Env& env, const ORTCHAR_T* model_path,
     return Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "string tensor can not have raw data");
   }
 
-  // unpacking tensor_proto data to preallocated tensor
-  void* preallocated = tensor.MutableDataRaw();
-  int64_t tensor_size = 1;
-  {
-    for (auto i : tensor_proto.dims()) {
-      if (i < 0) {
-        return Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "tensor can't contain negative dims");
+  if (endian::native == endian::little && raw_data != nullptr && deleter_for_file_data.d.f != nullptr) {
+    OrtMemoryInfo loc = tensor.Location();
+    TensorShape tensor_shape { tensor_shape_vec };
+    tensor = Tensor(source_type, tensor_shape, raw_data, loc);
+    deleter_for_file_data.d.f = nullptr;
+    deleter_for_file_data.d.param = nullptr;
+  }
+  else {
+    // unpacking tensor_proto data to preallocated tensor
+      void* preallocated = tensor.MutableDataRaw();
+      int64_t tensor_size = 1;
+      {
+        for (auto i : tensor_proto.dims()) {
+          if (i < 0) {
+            return Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "tensor can't contain negative dims");
+          }
+          tensor_size *= i;
+        }
       }
-      tensor_size *= i;
-    }
-  }
-  // tensor_size could be zero. see test_slice_start_out_of_bounds\test_data_set_0\output_0.pb
-  if (static_cast<uint64_t>(tensor_size) > SIZE_MAX) {
-    return Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "size overflow");
-  }
-  switch (tensor_proto.data_type()) {
-    CASE_PROTO(FLOAT, float);
-    CASE_PROTO(DOUBLE, double);
-    CASE_PROTO(BOOL, bool);
-    CASE_PROTO(INT8, int8_t);
-    CASE_PROTO(INT16, int16_t);
-    CASE_PROTO(INT32, int32_t);
-    CASE_PROTO(INT64, int64_t);
-    CASE_PROTO(UINT8, uint8_t);
-    CASE_PROTO(UINT16, uint16_t);
-    CASE_PROTO(UINT32, uint32_t);
-    CASE_PROTO(UINT64, uint64_t);
-    CASE_PROTO(FLOAT16, MLFloat16);
-    CASE_PROTO(BFLOAT16, BFloat16);
-    case ONNX_NAMESPACE::TensorProto_DataType::TensorProto_DataType_STRING:
-      ORT_RETURN_IF_ERROR(UnpackTensor<std::string>(tensor_proto, raw_data, raw_data_len,
-                                                    static_cast<std::string*>(preallocated),
-                                                    static_cast<size_t>(tensor_size)));
-      break;
-    default: {
-      std::ostringstream ostr;
-      ostr << "Initialized tensor with unexpected type: " << tensor_proto.data_type();
-      return common::Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, ostr.str());
-    }
+      // tensor_size could be zero. see test_slice_start_out_of_bounds\test_data_set_0\output_0.pb
+      if (static_cast<uint64_t>(tensor_size) > SIZE_MAX) {
+        return Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "size overflow");
+      }
+      switch (tensor_proto.data_type()) {
+        CASE_PROTO(FLOAT, float);
+        CASE_PROTO(DOUBLE, double);
+        CASE_PROTO(BOOL, bool);
+        CASE_PROTO(INT8, int8_t);
+        CASE_PROTO(INT16, int16_t);
+        CASE_PROTO(INT32, int32_t);
+        CASE_PROTO(INT64, int64_t);
+        CASE_PROTO(UINT8, uint8_t);
+        CASE_PROTO(UINT16, uint16_t);
+        CASE_PROTO(UINT32, uint32_t);
+        CASE_PROTO(UINT64, uint64_t);
+        CASE_PROTO(FLOAT16, MLFloat16);
+        CASE_PROTO(BFLOAT16, BFloat16);
+        case ONNX_NAMESPACE::TensorProto_DataType::TensorProto_DataType_STRING:
+          ORT_RETURN_IF_ERROR(UnpackTensor<std::string>(tensor_proto, raw_data, raw_data_len,
+                                                        static_cast<std::string*>(preallocated),
+                                                        static_cast<size_t>(tensor_size)));
+          break;
+        default: {
+          std::ostringstream ostr;
+          ostr << "Initialized tensor with unexpected type: " << tensor_proto.data_type();
+          return common::Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, ostr.str());
+        }
+      }
   }
 
   return Status::OK();
