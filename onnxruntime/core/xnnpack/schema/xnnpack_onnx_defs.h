@@ -52,6 +52,8 @@ inline void SetDimValue(::ONNX_NAMESPACE::TensorShapeProto_Dimension* left, int6
 inline void SetDimValue(int64_t& left, int64_t right) { left = right; }
 
 // padding_mode: 0, valid. 1, same
+// T1: int64_t or ::ONNX_NAMESPACE::TensorShapeProto_Dimension
+// T2: std::vector<int64> or std::array<int64,4> or std::array<::ONNX_NAMESPACE::TensorShapeProto_Dimension*, 4>
 template <typename T1, typename T2>
 OnnxStatus ConvShapeInference(const T1& batch_shape, ptrdiff_t in_height, ptrdiff_t in_width, ptrdiff_t in_channels,
                               const T1& out_channels, ptrdiff_t filter_height, ptrdiff_t filter_width,

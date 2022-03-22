@@ -203,8 +203,6 @@ ONNX_XNNPACK_OPERATOR_SET_SCHEMA(
         .Attr("dilation_height", "dilation_height. TFLite dilation_height_factor", AttributeProto::INT)
         .Attr("dilation_width", "dilation_width. TFLite dilation_width_factor", AttributeProto::INT)
         .Attr("groups", "groups", AttributeProto::INT)
-        //.Attr("group_input_channels", "group_input_channels", AttributeProto::INT)
-        //.Attr("group_output_channels", "group_output_channels", AttributeProto::INT)
         .Attr("padding_mode", "0:VALID. 1:SAME.", AttributeProto::INT)
         .Attr("output_min", "output_min", AttributeProto::FLOAT, -INFINITY)
         .Attr("output_max", "output_max", AttributeProto::FLOAT, INFINITY)
@@ -253,8 +251,6 @@ ONNX_XNNPACK_OPERATOR_SET_SCHEMA(
         .Attr("input_padding_right", "input_padding_right", AttributeProto::INT, static_cast<int64_t>(0))
         .Attr("input_padding_bottom", "input_padding_bottom", AttributeProto::INT, static_cast<int64_t>(0))
         .Attr("input_padding_left", "input_padding_left", AttributeProto::INT, static_cast<int64_t>(0))
-        //.Attr("kernel_height", "kernel_height", AttributeProto::INT) //TODO: is it just a dim of W?
-        //.Attr("kernel_width", "kernel_width", AttributeProto::INT)//TODO: is it just a dim of W?
         .Attr("subsampling_height", "subsampling_height. TFLite stride_height", AttributeProto::INT)
         .Attr("subsampling_width", "subsampling_width. TFLite stride_width", AttributeProto::INT)
         .Attr("dilation_height", "dilation_height. TFLite dilation_height_factor", AttributeProto::INT)
