@@ -128,8 +128,8 @@ OnnxStatus XnnPackDepthwiseConvolution2dShapeInferImpl(const ::ONNX_NAMESPACE::T
     return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL, "Weight tensor must have 4 dimensions");
   }
 
-  int64_t input_H = input_shape.dim(1).dim_value();
-  int64_t input_W = input_shape.dim(2).dim_value();
+  const ::ONNX_NAMESPACE::TensorShapeProto_Dimension& input_H = input_shape.dim(1);
+  const ::ONNX_NAMESPACE::TensorShapeProto_Dimension& input_W = input_shape.dim(2);
   int64_t input_C = input_shape.dim(3).dim_value();
 
   if (input_C == 0) {
@@ -140,27 +140,38 @@ OnnxStatus XnnPackDepthwiseConvolution2dShapeInferImpl(const ::ONNX_NAMESPACE::T
   int64_t size_one = weight_shape.dim(0).dim_value();
   if (size_one != 1) {
     std::ostringstream oss;
-    oss << "The first dim of weight must be one. Got " << size_one << ", " << input_H << ", " << input_W << ", "
-        << input_C << ".";
+    oss << "The first dim of weight must be one. Got " << size_one << ".";
     return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL, oss.str());
   }
   int64_t filter_height = weight_shape.dim(1).dim_value();
   int64_t filter_width = weight_shape.dim(2).dim_value();
-  int64_t input_channels_by_depth_multiplier = weight_shape.dim(3).dim_value();
-  if (input_channels_by_depth_multiplier % input_C != 0) {
-    return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL,
-                      "The last dim of weight is not multiple of input channels.");
+  if (weight_shape.dim(3).has_dim_value()) {
+    int64_t input_channels_by_depth_multiplier = weight_shape.dim(3).dim_value();
+    if (input_channels_by_depth_multiplier % input_C != 0) {
+      return OnnxStatus(StatusCategory::NONE, StatusCode::FAIL,
+                        "The last dim of weight is not multiple of input channels.");
+    }
   }
-  input_H += static_cast<int64_t>(input_padding_top) + input_padding_bottom;
-  input_W += static_cast<int64_t>(input_padding_right) + input_padding_left;
-  ::ONNX_NAMESPACE::TensorShapeProto_Dimension* output_dims[4];
+  std::array<::ONNX_NAMESPACE::TensorShapeProto_Dimension*, 4> output_dims = {nullptr, nullptr, nullptr, nullptr};
+
   output_dims[0] = final_output_shape->add_dim();
   output_dims[1] = final_output_shape->add_dim();
   output_dims[2] = final_output_shape->add_dim();
   output_dims[3] = final_output_shape->add_dim();
-  ONNX_RETURN_IF_ERROR(ConvShapeInference(input_shape.dim(0), input_H, input_W, input_C, weight_shape.dim(3),
-                                          filter_height, filter_width, input_C, subsampling_height, subsampling_width,
-                                          dilation_h, dilation_w, padding_mode, output_dims));
+
+  if (input_H.has_dim_value() && input_W.has_dim_value()) {
+    int64_t input_H_value = input_H.dim_value();
+    int64_t input_W_value = input_W.dim_value();
+    input_H_value += static_cast<int64_t>(input_padding_top) + input_padding_bottom;
+    input_W_value += static_cast<int64_t>(input_padding_right) + input_padding_left;
+    ONNX_RETURN_IF_ERROR(ConvShapeInference(
+        input_shape.dim(0), input_H_value, input_W_value, input_C, weight_shape.dim(3), filter_height, filter_width,
+        input_C, subsampling_height, subsampling_width, dilation_h, dilation_w, padding_mode, output_dims));
+  } else {
+    *output_dims[0] = input_shape.dim(0);
+    *output_dims[3] = weight_shape.dim(3);
+  }
+
   return OnnxStatus::OK();
 }
 
@@ -176,7 +187,7 @@ ONNX_XNNPACK_OPERATOR_SET_SCHEMA(
         .Input(0, "X", "", "tensor(float)")
         .Input(1, "W", "", "tensor(float)")
         .Input(2, "B", "", "tensor(float)")
-        .Output(0, "X1", "", "tensor(float)")
+        .Output(0, "Y", "", "tensor(float)")
         .Attr("input_padding_top", "Implicit zero-padding above 2D input data. Must be 0 if padding mode is SAME",
               AttributeProto::INT, static_cast<int64_t>(0))
         .Attr("input_padding_right",
@@ -237,7 +248,7 @@ ONNX_XNNPACK_OPERATOR_SET_SCHEMA(
         .Input(0, "X", "", "tensor(float)")
         .Input(1, "W", "Shape:[1, kernel_height, kernel_width, input_channels * depth_multiplier]", "tensor(float)")
         .Input(2, "B", "", "tensor(float)")
-        .Output(0, "X1", "", "tensor(float)")
+        .Output(0, "Y", "", "tensor(float)")
         .Attr("input_padding_top", "input_padding_top", AttributeProto::INT, static_cast<int64_t>(0))
         .Attr("input_padding_right", "input_padding_right", AttributeProto::INT, static_cast<int64_t>(0))
         .Attr("input_padding_bottom", "input_padding_bottom", AttributeProto::INT, static_cast<int64_t>(0))
